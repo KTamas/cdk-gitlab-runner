@@ -1,4 +1,4 @@
-import * as path from 'path';
+import * as path from "path";
 import {
   Instance,
   InstanceType,
@@ -16,32 +16,16 @@ import {
   CfnSpotFleet,
   ISecurityGroup,
   SubnetSelection,
-} from '@aws-cdk/aws-ec2';
-import {
-  IRole,
-  Role,
-  ServicePrincipal,
-  ManagedPolicy,
-  CfnInstanceProfile,
-  PolicyStatement,
-} from '@aws-cdk/aws-iam';
-import * as lambda from '@aws-cdk/aws-lambda';
-import * as logs from '@aws-cdk/aws-logs';
-import { Bucket } from '@aws-cdk/aws-s3';
-import {
-  Construct,
-  CfnOutput,
-  Fn,
-  Stack,
-  Duration,
-  Lazy,
-  CustomResource,
-  Token,
-  RemovalPolicy,
-} from '@aws-cdk/core';
-import * as cr from '@aws-cdk/custom-resources';
+  AmazonLinuxCpuType,
+} from "@aws-cdk/aws-ec2";
+import { IRole, Role, ServicePrincipal, ManagedPolicy, CfnInstanceProfile, PolicyStatement } from "@aws-cdk/aws-iam";
+import * as lambda from "@aws-cdk/aws-lambda";
+import * as logs from "@aws-cdk/aws-logs";
+import { Bucket } from "@aws-cdk/aws-s3";
+import { Construct, CfnOutput, Fn, Stack, Duration, Lazy, CustomResource, Token, RemovalPolicy } from "@aws-cdk/core";
+import * as cr from "@aws-cdk/custom-resources";
 
-import { DockerVolumes } from './gitlab-runner-interfaces';
+import { DockerVolumes } from "./gitlab-runner-interfaces";
 export interface GitlabContainerRunnerProps {
   /**
    * Gitlab token for the Register Runner .
@@ -75,6 +59,17 @@ export interface GitlabContainerRunnerProps {
    *
    */
   readonly ec2type?: string;
+
+  /**
+   * Runner default EC2 instance architecture.
+   *
+   * @example
+   * new GitlabContainerRunner(stack, 'runner', { gitlabtoken: 'GITLAB_TOKEN', ec2type: 't4g.small', cpuType: AmazonLinuxCpuType.ARM_64 });
+   *
+   * @default - AmazonLinuxCpuType.X86_64
+   *
+   */
+  readonly cpuType?: AmazonLinuxCpuType;
 
   /**
    * VPC for the Gitlab Runner .
@@ -287,9 +282,9 @@ export enum BlockDuration {
 }
 
 export enum InstanceInterruptionBehavior {
-  HIBERNATE = 'hibernate',
-  STOP = 'stop',
-  TERMINATE = 'terminate',
+  HIBERNATE = "hibernate",
+  STOP = "stop",
+  TERMINATE = "terminate",
 }
 
 export class GitlabContainerRunner extends Construct {
@@ -333,14 +328,15 @@ export class GitlabContainerRunner extends Construct {
     const spotFleetId = id;
 
     const defaultProps = {
-      gitlabRunnerImage: 'public.ecr.aws/gitlab/gitlab-runner:alpine',
-      gitlaburl: 'https://gitlab.com/',
-      ec2type: 't3.micro',
-      tags: ['gitlab', 'awscdk', 'runner'],
+      gitlabRunnerImage: "public.ecr.aws/gitlab/gitlab-runner:alpine",
+      gitlaburl: "https://gitlab.com/",
+      ec2type: "t3.micro",
+      tags: ["gitlab", "awscdk", "runner"],
+      cpuType: AmazonLinuxCpuType.X86_64,
     };
     const runnerProps = { ...defaultProps, ...props };
 
-    const runnerBucket = new Bucket(this, 'runnerBucket', {
+    const runnerBucket = new Bucket(this, "runnerBucket", {
       removalPolicy: RemovalPolicy.DESTROY,
     });
     const shell = UserData.forLinux();
@@ -348,30 +344,30 @@ export class GitlabContainerRunner extends Construct {
 
     this.runnerRole =
       runnerProps.ec2iamrole ??
-      new Role(this, 'runner-role', {
-        assumedBy: new ServicePrincipal('ec2.amazonaws.com'),
-        description: 'For Gitlab EC2 Runner Role',
+      new Role(this, "runner-role", {
+        assumedBy: new ServicePrincipal("ec2.amazonaws.com"),
+        description: "For Gitlab EC2 Runner Role",
       });
     this.validUntil = runnerProps.validUntil;
-    const instanceProfile = new CfnInstanceProfile(this, 'InstanceProfile', {
+    const instanceProfile = new CfnInstanceProfile(this, "InstanceProfile", {
       roles: [this.runnerRole.roleName],
     });
     runnerBucket.grantWrite(this.runnerRole);
     this.vpc =
       runnerProps.selfvpc ??
-      new Vpc(this, 'VPC', {
-        cidr: '10.0.0.0/16',
+      new Vpc(this, "VPC", {
+        cidr: "10.0.0.0/16",
         maxAzs: 2,
         subnetConfiguration: [
           {
             cidrMask: 26,
-            name: 'RunnerVPC',
+            name: "RunnerVPC",
             subnetType: SubnetType.PUBLIC,
           },
         ],
         natGateways: 0,
       });
-    this.defaultRunnerSG = new SecurityGroup(this, 'SpotFleetSg', {
+    this.defaultRunnerSG = new SecurityGroup(this, "SpotFleetSg", {
       vpc: this.vpc,
     });
     this.defaultRunnerSG.connections.allowFromAnyIpv4(Port.tcp(22));
@@ -381,14 +377,15 @@ export class GitlabContainerRunner extends Construct {
 
       const imageId = MachineImage.latestAmazonLinux({
         generation: AmazonLinuxGeneration.AMAZON_LINUX_2,
+        cpuType: runnerProps.cpuType,
       }).getImage(this).imageId;
-      const lt = new CfnLaunchTemplate(this, 'LaunchTemplate', {
+      const lt = new CfnLaunchTemplate(this, "LaunchTemplate", {
         launchTemplateData: {
           imageId,
           instanceType: runnerProps.ec2type,
           blockDeviceMappings: [
             {
-              deviceName: '/dev/xvda',
+              deviceName: "/dev/xvda",
               ebs: {
                 volumeSize: runnerProps.ebsSize ?? 60,
               },
@@ -398,52 +395,41 @@ export class GitlabContainerRunner extends Construct {
           keyName: runnerProps.keyName,
           tagSpecifications: [
             {
-              resourceType: 'instance',
+              resourceType: "instance",
               tags: [
                 {
-                  key: 'Name',
-                  value: `${Stack.of(this).stackName
-                  }/spotFleetGitlabRunner/${spotFleetId}`,
+                  key: "Name",
+                  value: `${Stack.of(this).stackName}/spotFleetGitlabRunner/${spotFleetId}`,
                 },
               ],
             },
           ],
           instanceMarketOptions: {
-            marketType: 'spot',
+            marketType: "spot",
             spotOptions: {
-              blockDurationMinutes:
-                runnerProps.blockDuration ?? BlockDuration.ONE_HOUR,
+              blockDurationMinutes: runnerProps.blockDuration ?? BlockDuration.ONE_HOUR,
               instanceInterruptionBehavior:
-                runnerProps.instanceInterruptionBehavior ??
-                InstanceInterruptionBehavior.TERMINATE,
+                runnerProps.instanceInterruptionBehavior ?? InstanceInterruptionBehavior.TERMINATE,
             },
           },
-          securityGroupIds: this.defaultRunnerSG.connections.securityGroups.map(
-            (m) => m.securityGroupId,
-          ),
+          securityGroupIds: this.defaultRunnerSG.connections.securityGroups.map((m) => m.securityGroupId),
           iamInstanceProfile: {
             arn: instanceProfile.attrArn,
           },
         },
       });
 
-      const spotFleetRole = new Role(this, 'FleetRole', {
-        assumedBy: new ServicePrincipal('spotfleet.amazonaws.com'),
-        managedPolicies: [
-          ManagedPolicy.fromAwsManagedPolicyName(
-            'service-role/AmazonEC2SpotFleetTaggingRole',
-          ),
-        ],
+      const spotFleetRole = new Role(this, "FleetRole", {
+        assumedBy: new ServicePrincipal("spotfleet.amazonaws.com"),
+        managedPolicies: [ManagedPolicy.fromAwsManagedPolicyName("service-role/AmazonEC2SpotFleetTaggingRole")],
       });
 
       const vpcSubnetSelection = runnerProps.vpcSubnet ?? {
         subnetType: SubnetType.PUBLIC,
       };
-      const subnetConfig = this.vpc
-        .selectSubnets(vpcSubnetSelection)
-        .subnets.map((s) => ({
-          subnetId: s.subnetId,
-        }));
+      const subnetConfig = this.vpc.selectSubnets(vpcSubnetSelection).subnets.map((s) => ({
+        subnetId: s.subnetId,
+      }));
 
       const cfnSpotFleet = new CfnSpotFleet(this, id, {
         spotFleetRequestConfigData: {
@@ -462,22 +448,22 @@ export class GitlabContainerRunner extends Construct {
           terminateInstancesWithExpiration: true,
         },
       });
-      const onEvent = new lambda.Function(this, 'OnEvent', {
-        code: lambda.Code.fromAsset(path.join(__dirname, '../assets/functions')),
-        handler: 'index.on_event',
+      const onEvent = new lambda.Function(this, "OnEvent", {
+        code: lambda.Code.fromAsset(path.join(__dirname, "../assets/functions")),
+        handler: "index.on_event",
         runtime: lambda.Runtime.PYTHON_3_8,
         timeout: Duration.seconds(60),
       });
 
-      const isComplete = new lambda.Function(this, 'IsComplete', {
-        code: lambda.Code.fromAsset(path.join(__dirname, '../assets/functions')),
-        handler: 'index.is_complete',
+      const isComplete = new lambda.Function(this, "IsComplete", {
+        code: lambda.Code.fromAsset(path.join(__dirname, "../assets/functions")),
+        handler: "index.is_complete",
         runtime: lambda.Runtime.PYTHON_3_8,
         timeout: Duration.seconds(60),
         role: onEvent.role,
       });
 
-      const myProvider = new cr.Provider(this, 'MyProvider', {
+      const myProvider = new cr.Provider(this, "MyProvider", {
         onEventHandler: onEvent,
         isCompleteHandler: isComplete,
         logRetention: logs.RetentionDays.ONE_DAY,
@@ -485,12 +471,12 @@ export class GitlabContainerRunner extends Construct {
 
       onEvent.addToRolePolicy(
         new PolicyStatement({
-          actions: ['ec2:DescribeSpotFleetInstances'],
-          resources: ['*'],
-        }),
+          actions: ["ec2:DescribeSpotFleetInstances"],
+          resources: ["*"],
+        })
       );
 
-      const fleetInstances = new CustomResource(this, 'GetInstanceId', {
+      const fleetInstances = new CustomResource(this, "GetInstanceId", {
         serviceToken: myProvider.serviceToken,
         properties: {
           SpotFleetRequestId: cfnSpotFleet.ref,
@@ -498,18 +484,14 @@ export class GitlabContainerRunner extends Construct {
       });
 
       fleetInstances.node.addDependency(cfnSpotFleet);
-      this.spotFleetInstanceId = Token.asString(
-        fleetInstances.getAtt('InstanceId'),
-      );
-      this.spotFleetRequestId = Token.asString(
-        fleetInstances.getAtt('SpotInstanceRequestId'),
-      );
-      new CfnOutput(this, 'InstanceId', { value: this.spotFleetInstanceId });
-      new CfnOutput(this, 'SpotFleetId', { value: cfnSpotFleet.ref });
+      this.spotFleetInstanceId = Token.asString(fleetInstances.getAtt("InstanceId"));
+      this.spotFleetRequestId = Token.asString(fleetInstances.getAtt("SpotInstanceRequestId"));
+      new CfnOutput(this, "InstanceId", { value: this.spotFleetInstanceId });
+      new CfnOutput(this, "SpotFleetId", { value: cfnSpotFleet.ref });
     } else {
-      this.runnerEc2 = new Instance(this, 'GitlabRunner', {
+      this.runnerEc2 = new Instance(this, "GitlabRunner", {
         instanceType: new InstanceType(runnerProps.ec2type),
-        instanceName: 'Gitlab-Runner',
+        instanceName: "Gitlab-Runner",
         vpc: this.vpc,
         vpcSubnets: runnerProps.vpcSubnet ?? {
           subnetType: SubnetType.PUBLIC,
@@ -522,30 +504,30 @@ export class GitlabContainerRunner extends Construct {
         securityGroup: this.defaultRunnerSG,
         blockDevices: [
           {
-            deviceName: '/dev/xvda',
+            deviceName: "/dev/xvda",
             volume: BlockDeviceVolume.ebs(runnerProps.ebsSize ?? 60),
           },
         ],
       });
-      new CfnOutput(this, 'Runner-Instance-ID', {
+      new CfnOutput(this, "Runner-Instance-ID", {
         value: this.runnerEc2.instanceId,
       });
     }
 
-    const unregisterRunnerOnEvent = new lambda.Function(this, 'unregisterRunnerOnEvent', {
-      code: lambda.Code.fromAsset(path.join(__dirname, '../assets/functions')),
-      handler: 'unregister_runner.on_event',
+    const unregisterRunnerOnEvent = new lambda.Function(this, "unregisterRunnerOnEvent", {
+      code: lambda.Code.fromAsset(path.join(__dirname, "../assets/functions")),
+      handler: "unregister_runner.on_event",
       runtime: lambda.Runtime.PYTHON_3_8,
       timeout: Duration.seconds(60),
     });
 
-    const unregisterRunnerProvider = new cr.Provider(this, 'unregisterRunnerProvider', {
+    const unregisterRunnerProvider = new cr.Provider(this, "unregisterRunnerProvider", {
       onEventHandler: unregisterRunnerOnEvent,
       logRetention: logs.RetentionDays.ONE_DAY,
     });
 
-    const unregisterRunnerCR = new CustomResource(this, 'unregisterRunnerCR', {
-      resourceType: 'Custom::unregisterRunnerProvider',
+    const unregisterRunnerCR = new CustomResource(this, "unregisterRunnerCR", {
+      resourceType: "Custom::unregisterRunnerProvider",
       serviceToken: unregisterRunnerProvider.serviceToken,
       properties: {
         BucketName: runnerBucket.bucketName,
@@ -555,11 +537,9 @@ export class GitlabContainerRunner extends Construct {
 
     runnerBucket.grantReadWrite(unregisterRunnerOnEvent);
     unregisterRunnerCR.node.addDependency(runnerBucket);
-    this.runnerRole.addManagedPolicy(
-      ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore'),
-    );
+    this.runnerRole.addManagedPolicy(ManagedPolicy.fromAwsManagedPolicyName("AmazonSSMManagedInstanceCore"));
 
-    new CfnOutput(this, 'Runner-Role-Arn', {
+    new CfnOutput(this, "Runner-Role-Arn", {
       value: this.runnerRole.roleArn,
     });
   }
@@ -577,10 +557,10 @@ export class GitlabContainerRunner extends Construct {
     let tempString: string = '--docker-volumes "/var/run/docker.sock:/var/run/docker.sock"';
     if (dockerVolume) {
       let tempList: string[] = [];
-      dockerVolume.forEach(e => {
+      dockerVolume.forEach((e) => {
         tempList.push(`"${e.hostPath}:${e.containerPath}"`);
       });
-      tempList.forEach(e => {
+      tempList.forEach((e) => {
         tempString = `${tempString} --docker-volumes ${e}`;
       });
     }
@@ -589,14 +569,16 @@ export class GitlabContainerRunner extends Construct {
 
   public createUserData(props: GitlabContainerRunnerProps, bucketName: string): string[] {
     return [
-      'yum update -y ',
-      'sleep 15 && amazon-linux-extras install docker && yum install -y amazon-cloudwatch-agent && systemctl start docker && usermod -aG docker ec2-user && chmod 777 /var/run/docker.sock',
-      'systemctl restart docker && systemctl enable docker',
+      "yum update -y ",
+      "sleep 15 && amazon-linux-extras install docker && yum install -y amazon-cloudwatch-agent && systemctl start docker && usermod -aG docker ec2-user && chmod 777 /var/run/docker.sock",
+      "systemctl restart docker && systemctl enable docker",
       `docker run -d -v /home/ec2-user/.gitlab-runner:/etc/gitlab-runner -v /var/run/docker.sock:/var/run/docker.sock \
-      --name gitlab-runner-register ${props.gitlabRunnerImage} register --non-interactive --url ${props.gitlaburl} --registration-token ${props.gitlabtoken} \
+      --name gitlab-runner-register ${props.gitlabRunnerImage} register --non-interactive --url ${
+        props.gitlaburl
+      } --registration-token ${props.gitlabtoken} \
       --docker-pull-policy if-not-present ${this.dockerVolumesList(props?.dockerVolumes)} \
       --executor docker --docker-image "alpine:latest" --description "Docker Runner" \
-      --tag-list "${props.tags?.join(',')}" --docker-privileged`,
+      --tag-list "${props.tags?.join(",")}" --docker-privileged`,
       `sleep 2 && docker run --restart always -d -v /home/ec2-user/.gitlab-runner:/etc/gitlab-runner -v /var/run/docker.sock:/var/run/docker.sock --name gitlab-runner ${props.gitlabRunnerImage}`,
       `TOKEN=$(cat /home/ec2-user/.gitlab-runner/config.toml | grep token | cut -d '"' -f 2) && echo '{"token": "TOKEN"}' > /tmp/runnertoken.txt && sed -i s/TOKEN/$TOKEN/g /tmp/runnertoken.txt && aws s3 cp /tmp/runnertoken.txt s3://${bucketName}`,
     ];
