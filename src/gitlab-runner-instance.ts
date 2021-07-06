@@ -338,6 +338,7 @@ export class GitlabContainerRunner extends Construct {
 
     const runnerBucket = new Bucket(this, "runnerBucket", {
       removalPolicy: RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
     });
     const shell = UserData.forLinux();
     shell.addCommands(...this.createUserData(runnerProps, runnerBucket.bucketName));
