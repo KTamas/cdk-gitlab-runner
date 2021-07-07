@@ -576,7 +576,7 @@ export class GitlabContainerRunner extends Construct {
       `docker run -d -v /home/ec2-user/.gitlab-runner:/etc/gitlab-runner -v /var/run/docker.sock:/var/run/docker.sock \
       --name gitlab-runner-register ${props.gitlabRunnerImage} register --non-interactive --url ${
         props.gitlaburl
-      } --registration-token ${props.gitlabtoken} \
+      } --registration-token ${props.gitlabtoken} --run-untagged="true" \
       --docker-pull-policy if-not-present ${this.dockerVolumesList(props?.dockerVolumes)} \
       --executor docker --docker-image "alpine:latest" --description "Docker Runner" \
       --tag-list "${props.tags?.join(",")}" --docker-privileged`,

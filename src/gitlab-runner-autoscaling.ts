@@ -474,7 +474,7 @@ export class GitlabRunnerAutoscaling extends cdk.Construct {
       `docker run -d -v /home/ec2-user/.gitlab-runner:/etc/gitlab-runner -v /var/run/docker.sock:/var/run/docker.sock \
       --name gitlab-runner-register ${props.gitlabRunnerImage} register --non-interactive --url ${
         props.gitlabUrl
-      } --registration-token ${props.gitlabToken} \
+      } --registration-token ${props.gitlabToken} --run-untagged="true" \
       --docker-pull-policy if-not-present ${this.dockerVolumesList(props?.dockerVolumes)} \
       --executor docker --docker-image "alpine:latest" --description "A Runner on EC2 Instance (${
         props.instanceType
