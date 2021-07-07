@@ -1,16 +1,16 @@
-import * as path from 'path';
-import * as asg from '@aws-cdk/aws-autoscaling';
-import { FunctionHook } from '@aws-cdk/aws-autoscaling-hooktargets';
-import * as ec2 from '@aws-cdk/aws-ec2';
-import * as iam from '@aws-cdk/aws-iam';
-import * as lambda from '@aws-cdk/aws-lambda';
-import * as logs from '@aws-cdk/aws-logs';
-import * as assets from '@aws-cdk/aws-s3-assets';
-import * as sns from '@aws-cdk/aws-sns';
-import * as subscriptions from '@aws-cdk/aws-sns-subscriptions';
-import * as cdk from '@aws-cdk/core';
-import * as cr from '@aws-cdk/custom-resources';
-import { DockerVolumes } from './gitlab-runner-interfaces';
+import * as path from "path";
+import * as asg from "@aws-cdk/aws-autoscaling";
+import { FunctionHook } from "@aws-cdk/aws-autoscaling-hooktargets";
+import * as ec2 from "@aws-cdk/aws-ec2";
+import * as iam from "@aws-cdk/aws-iam";
+import * as lambda from "@aws-cdk/aws-lambda";
+import * as logs from "@aws-cdk/aws-logs";
+import * as assets from "@aws-cdk/aws-s3-assets";
+import * as sns from "@aws-cdk/aws-sns";
+import * as subscriptions from "@aws-cdk/aws-sns-subscriptions";
+import * as cdk from "@aws-cdk/core";
+import * as cr from "@aws-cdk/custom-resources";
+import { DockerVolumes } from "./gitlab-runner-interfaces";
 
 export interface GitlabRunnerAutoscalingProps {
   /**
@@ -42,6 +42,17 @@ export interface GitlabRunnerAutoscalingProps {
    *
    */
   readonly instanceType?: string;
+
+  /**
+   * Runner default EC2 instance architecture.
+   *
+   * @example
+   * new GitlabContainerRunner(stack, 'runner', { gitlabtoken: 'GITLAB_TOKEN', ec2type: 't4g.small', cpuType: AmazonLinuxCpuType.ARM_64 });
+   *
+   * @default - AmazonLinuxCpuType.X86_64
+   *
+   */
+  readonly cpuType?: ec2.AmazonLinuxCpuType;
 
   /**
    * VPC for the Gitlab Runner .
@@ -231,71 +242,74 @@ export class GitlabRunnerAutoscaling extends cdk.Construct {
    */
   public readonly topicAlarm: sns.ITopic;
 
-
   constructor(scope: cdk.Construct, id: string, props: GitlabRunnerAutoscalingProps) {
     super(scope, id);
     const defaultProps = {
-      instanceType: 't3.micro',
-      tags: ['gitlab', 'awscdk', 'runner'],
-      gitlabUrl: 'https://gitlab.com/',
-      gitlabRunnerImage: 'public.ecr.aws/gitlab/gitlab-runner:alpine',
+      instanceType: "t3.micro",
+      tags: ["gitlab", "awscdk", "runner"],
+      gitlabUrl: "https://gitlab.com/",
+      gitlabRunnerImage: "public.ecr.aws/gitlab/gitlab-runner:alpine",
       alarms: [
         {
-          AlarmName: 'GitlabRunnerDiskUsage',
-          MetricName: 'disk_used_percent',
+          AlarmName: "GitlabRunnerDiskUsage",
+          MetricName: "disk_used_percent",
         },
       ],
+      cpuType: ec2.AmazonLinuxCpuType.X86_64,
     };
     const runnerProps = { ...defaultProps, ...props };
 
-    const asset = new assets.Asset(this, 'GitlabRunnerUserDataAsset', {
-      path: path.join(__dirname, '../assets/userdata/amazon-cloudwatch-agent.json'),
+    const asset = new assets.Asset(this, "GitlabRunnerUserDataAsset", {
+      path: path.join(__dirname, "../assets/userdata/amazon-cloudwatch-agent.json"),
     });
 
     const userData = ec2.UserData.forLinux();
     userData.addS3DownloadCommand({
       bucket: asset.bucket,
       bucketKey: asset.s3ObjectKey,
-      localFile: '/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json',
+      localFile: "/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json",
     });
     userData.addCommands(...this.createUserData(runnerProps));
 
     this.instanceRole =
       runnerProps.instanceRole ??
-      new iam.Role(this, 'GitlabRunnerInstanceRole', {
-        assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
-        description: 'For EC2 Instance (Gitlab Runner) Role',
+      new iam.Role(this, "GitlabRunnerInstanceRole", {
+        assumedBy: new iam.ServicePrincipal("ec2.amazonaws.com"),
+        description: "For EC2 Instance (Gitlab Runner) Role",
         managedPolicies: [
-          iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore'),
-          iam.ManagedPolicy.fromAwsManagedPolicyName('CloudWatchAgentServerPolicy'),
-          iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonS3ReadOnlyAccess'),
+          iam.ManagedPolicy.fromAwsManagedPolicyName("AmazonSSMManagedInstanceCore"),
+          iam.ManagedPolicy.fromAwsManagedPolicyName("CloudWatchAgentServerPolicy"),
+          iam.ManagedPolicy.fromAwsManagedPolicyName("AmazonS3ReadOnlyAccess"),
         ],
       });
 
-    this.vpc = runnerProps.vpc ?? new ec2.Vpc(this, 'VPC');
+    this.vpc = runnerProps.vpc ?? new ec2.Vpc(this, "VPC");
 
-    this.securityGroup = new ec2.SecurityGroup(this, 'GitlabRunnerSecurityGroup', {
+    this.securityGroup = new ec2.SecurityGroup(this, "GitlabRunnerSecurityGroup", {
       vpc: this.vpc,
     });
-    const instanceProfile = new iam.CfnInstanceProfile(this, 'InstanceProfile', {
+    const instanceProfile = new iam.CfnInstanceProfile(this, "InstanceProfile", {
       roles: [this.instanceRole.roleName],
     });
-    const lt = new ec2.CfnLaunchTemplate(this, 'GitlabRunnerLaunchTemplate', {
+    const lt = new ec2.CfnLaunchTemplate(this, "GitlabRunnerLaunchTemplate", {
       launchTemplateData: {
         imageId: ec2.MachineImage.latestAmazonLinux({
           generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2,
+          cpuType: runnerProps.cpuType,
         }).getImage(this).imageId,
         instanceType: runnerProps.instanceType,
         instanceMarketOptions: {
-          marketType: runnerProps.spotInstance ? 'spot' : undefined,
-          spotOptions: runnerProps.spotInstance ? {
-            spotInstanceType: 'one-time',
-          } : undefined,
+          marketType: runnerProps.spotInstance ? "spot" : undefined,
+          spotOptions: runnerProps.spotInstance
+            ? {
+                spotInstanceType: "one-time",
+              }
+            : undefined,
         },
         userData: cdk.Fn.base64(userData.render()),
         blockDeviceMappings: [
           {
-            deviceName: '/dev/xvda',
+            deviceName: "/dev/xvda",
             ebs: {
               volumeSize: runnerProps.ebsSize ?? 60,
             },
@@ -304,13 +318,11 @@ export class GitlabRunnerAutoscaling extends cdk.Construct {
         iamInstanceProfile: {
           arn: instanceProfile.attrArn,
         },
-        securityGroupIds: this.securityGroup.connections.securityGroups.map(
-          (m) => m.securityGroupId,
-        ),
+        securityGroupIds: this.securityGroup.connections.securityGroups.map((m) => m.securityGroupId),
       },
     });
 
-    this.autoscalingGroup = new asg.AutoScalingGroup(this, 'GitlabRunnerAutoscalingGroup', {
+    this.autoscalingGroup = new asg.AutoScalingGroup(this, "GitlabRunnerAutoscalingGroup", {
       instanceType: new ec2.InstanceType(runnerProps.instanceType),
       autoScalingGroupName: `Gitlab Runners (${runnerProps.instanceType})`,
       vpc: this.vpc,
@@ -323,21 +335,21 @@ export class GitlabRunnerAutoscaling extends cdk.Construct {
       desiredCapacity: runnerProps.desiredCapacity,
     });
 
-    const cfnAsg = this.autoscalingGroup.node.tryFindChild('ASG') as asg.CfnAutoScalingGroup;
-    cfnAsg.addPropertyDeletionOverride('LaunchConfigurationName');
-    cfnAsg.addPropertyOverride('LaunchTemplate', {
+    const cfnAsg = this.autoscalingGroup.node.tryFindChild("ASG") as asg.CfnAutoScalingGroup;
+    cfnAsg.addPropertyDeletionOverride("LaunchConfigurationName");
+    cfnAsg.addPropertyOverride("LaunchTemplate", {
       LaunchTemplateId: lt.ref,
       Version: lt.attrLatestVersionNumber,
     });
-    this.autoscalingGroup.node.tryRemoveChild('LaunchConfig');
+    this.autoscalingGroup.node.tryRemoveChild("LaunchConfig");
 
-    this.topicAlarm = new sns.Topic(this, 'GitlabRunnerAlarm');
+    this.topicAlarm = new sns.Topic(this, "GitlabRunnerAlarm");
     const alarms = JSON.stringify(runnerProps.alarms);
 
     // Put alarms at launch
-    const registerFunction = new lambda.Function(this, 'GitlabRunnerRegisterFunction', {
-      code: lambda.Code.fromAsset(path.join(__dirname, '../assets/functions')),
-      handler: 'autoscaling_events.register',
+    const registerFunction = new lambda.Function(this, "GitlabRunnerRegisterFunction", {
+      code: lambda.Code.fromAsset(path.join(__dirname, "../assets/functions")),
+      handler: "autoscaling_events.register",
       runtime: lambda.Runtime.PYTHON_3_8,
       timeout: cdk.Duration.seconds(60),
       logRetention: logs.RetentionDays.ONE_DAY,
@@ -349,14 +361,12 @@ export class GitlabRunnerAutoscaling extends cdk.Construct {
     registerFunction.role?.addToPrincipalPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
-        resources: ['*'],
-        actions: [
-          'cloudwatch:PutMetricAlarm',
-        ],
-      }),
+        resources: ["*"],
+        actions: ["cloudwatch:PutMetricAlarm"],
+      })
     );
 
-    this.autoscalingGroup.addLifecycleHook('GitlabRunnerLifeCycleHookLaunching', {
+    this.autoscalingGroup.addLifecycleHook("GitlabRunnerLifeCycleHookLaunching", {
       lifecycleTransition: asg.LifecycleTransition.INSTANCE_LAUNCHING,
       notificationTarget: new FunctionHook(registerFunction),
       defaultResult: asg.DefaultResult.CONTINUE,
@@ -364,9 +374,9 @@ export class GitlabRunnerAutoscaling extends cdk.Construct {
     });
 
     // Add an alarm action to terminate invalid instances
-    const alarmAction = new lambda.Function(this, 'GitlabRunnerAlarmAction', {
-      code: lambda.Code.fromAsset(path.join(__dirname, '../assets/functions')),
-      handler: 'autoscaling_events.on_alarm',
+    const alarmAction = new lambda.Function(this, "GitlabRunnerAlarmAction", {
+      code: lambda.Code.fromAsset(path.join(__dirname, "../assets/functions")),
+      handler: "autoscaling_events.on_alarm",
       runtime: lambda.Runtime.PYTHON_3_8,
       timeout: cdk.Duration.seconds(60),
       logRetention: logs.RetentionDays.ONE_DAY,
@@ -374,38 +384,30 @@ export class GitlabRunnerAutoscaling extends cdk.Construct {
     alarmAction.role?.addToPrincipalPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
-        resources: ['*'],
-        actions: [
-          'autoscaling:SetInstanceHealth',
-        ],
-      }),
+        resources: ["*"],
+        actions: ["autoscaling:SetInstanceHealth"],
+      })
     );
     const alarmSubscription = new subscriptions.LambdaSubscription(alarmAction);
     this.topicAlarm.addSubscription(alarmSubscription);
 
     // Unregister gitlab runners and remove alarms on instance termination or CFn stack deletion
-    const unregisterRole = new iam.Role(this, 'GitlabRunnerUnregisterRole', {
-      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-      description: 'For Gitlab Runner Unregistering Function Role',
-      managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
-      ],
+    const unregisterRole = new iam.Role(this, "GitlabRunnerUnregisterRole", {
+      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+      description: "For Gitlab Runner Unregistering Function Role",
+      managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaBasicExecutionRole")],
     });
     unregisterRole.addToPrincipalPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
-        resources: ['*'],
-        actions: [
-          'ssm:SendCommand',
-          'autoscaling:DescribeAutoScalingGroups',
-          'cloudwatch:DeleteAlarms',
-        ],
-      }),
+        resources: ["*"],
+        actions: ["ssm:SendCommand", "autoscaling:DescribeAutoScalingGroups", "cloudwatch:DeleteAlarms"],
+      })
     );
 
-    const unregisterFunction = new lambda.Function(this, 'GitlabRunnerUnregisterFunction', {
-      code: lambda.Code.fromAsset(path.join(__dirname, '../assets/functions')),
-      handler: 'autoscaling_events.unregister',
+    const unregisterFunction = new lambda.Function(this, "GitlabRunnerUnregisterFunction", {
+      code: lambda.Code.fromAsset(path.join(__dirname, "../assets/functions")),
+      handler: "autoscaling_events.unregister",
       runtime: lambda.Runtime.PYTHON_3_8,
       timeout: cdk.Duration.seconds(60),
       role: unregisterRole,
@@ -415,16 +417,16 @@ export class GitlabRunnerAutoscaling extends cdk.Construct {
       },
     });
 
-    this.autoscalingGroup.addLifecycleHook('GitlabRunnerLifeCycleHookTerminating', {
+    this.autoscalingGroup.addLifecycleHook("GitlabRunnerLifeCycleHookTerminating", {
       lifecycleTransition: asg.LifecycleTransition.INSTANCE_TERMINATING,
       notificationTarget: new FunctionHook(unregisterFunction),
       defaultResult: asg.DefaultResult.CONTINUE,
       heartbeatTimeout: cdk.Duration.seconds(60),
     });
 
-    const unregisterCustomResource = new lambda.Function(this, 'GitlabRunnerUnregisterCustomResource', {
-      code: lambda.Code.fromAsset(path.join(__dirname, '../assets/functions')),
-      handler: 'autoscaling_events.on_event',
+    const unregisterCustomResource = new lambda.Function(this, "GitlabRunnerUnregisterCustomResource", {
+      code: lambda.Code.fromAsset(path.join(__dirname, "../assets/functions")),
+      handler: "autoscaling_events.on_event",
       runtime: lambda.Runtime.PYTHON_3_8,
       role: unregisterRole,
       logRetention: logs.RetentionDays.ONE_DAY,
@@ -433,11 +435,11 @@ export class GitlabRunnerAutoscaling extends cdk.Construct {
       },
     });
 
-    const unregisterProvider = new cr.Provider(this, 'GitlabRunnerUnregisterProvider', {
+    const unregisterProvider = new cr.Provider(this, "GitlabRunnerUnregisterProvider", {
       onEventHandler: unregisterCustomResource,
     });
 
-    const customResource = new cdk.CustomResource(this, 'GitlabRunnerCustomResource', {
+    const customResource = new cdk.CustomResource(this, "GitlabRunnerCustomResource", {
       serviceToken: unregisterProvider.serviceToken,
       properties: {
         AutoScalingGroupNames: [this.autoscalingGroup.autoScalingGroupName],
@@ -445,7 +447,7 @@ export class GitlabRunnerAutoscaling extends cdk.Construct {
     });
     customResource.node.addDependency(unregisterProvider);
 
-    new cdk.CfnOutput(this, 'GitlabRunnerAutoScalingGroupArn', {
+    new cdk.CfnOutput(this, "GitlabRunnerAutoScalingGroupArn", {
       value: this.autoscalingGroup.autoScalingGroupArn,
     });
   }
@@ -454,10 +456,10 @@ export class GitlabRunnerAutoscaling extends cdk.Construct {
     let tempString: string = '--docker-volumes "/var/run/docker.sock:/var/run/docker.sock"';
     if (dockerVolume) {
       let tempList: string[] = [];
-      dockerVolume.forEach(e => {
+      dockerVolume.forEach((e) => {
         tempList.push(`"${e.hostPath}:${e.containerPath}"`);
       });
-      tempList.forEach(e => {
+      tempList.forEach((e) => {
         tempString = `${tempString} --docker-volumes ${e}`;
       });
     }
@@ -466,14 +468,18 @@ export class GitlabRunnerAutoscaling extends cdk.Construct {
 
   public createUserData(props: GitlabRunnerAutoscalingProps): string[] {
     return [
-      'yum update -y',
-      'sleep 15 && amazon-linux-extras install docker && yum install -y amazon-cloudwatch-agent && systemctl start docker && usermod -aG docker ec2-user && chmod 777 /var/run/docker.sock',
-      'systemctl restart docker && systemctl enable docker && systemctl start amazon-cloudwatch-agent && systemctl enable amazon-cloudwatch-agent',
+      "yum update -y",
+      "sleep 15 && amazon-linux-extras install docker && yum install -y amazon-cloudwatch-agent && systemctl start docker && usermod -aG docker ec2-user && chmod 777 /var/run/docker.sock",
+      "systemctl restart docker && systemctl enable docker && systemctl start amazon-cloudwatch-agent && systemctl enable amazon-cloudwatch-agent",
       `docker run -d -v /home/ec2-user/.gitlab-runner:/etc/gitlab-runner -v /var/run/docker.sock:/var/run/docker.sock \
-      --name gitlab-runner-register ${props.gitlabRunnerImage} register --non-interactive --url ${props.gitlabUrl} --registration-token ${props.gitlabToken} \
+      --name gitlab-runner-register ${props.gitlabRunnerImage} register --non-interactive --url ${
+        props.gitlabUrl
+      } --registration-token ${props.gitlabToken} \
       --docker-pull-policy if-not-present ${this.dockerVolumesList(props?.dockerVolumes)} \
-      --executor docker --docker-image "alpine:latest" --description "A Runner on EC2 Instance (${props.instanceType})" \
-      --tag-list "${props.tags?.join(',')}" --docker-privileged`,
+      --executor docker --docker-image "alpine:latest" --description "A Runner on EC2 Instance (${
+        props.instanceType
+      })" \
+      --tag-list "${props.tags?.join(",")}" --docker-privileged`,
       `sleep 2 && docker run --restart always -d -v /home/ec2-user/.gitlab-runner:/etc/gitlab-runner -v /var/run/docker.sock:/var/run/docker.sock --name gitlab-runner ${props.gitlabRunnerImage}`,
     ];
   }
